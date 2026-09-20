@@ -1,0 +1,6 @@
+github.com/zamiba/go-mediaitems v0.2.0 h1:dZMSPNcfI/Vpx8Zh+a7tOI1P9C62G2idC5c+2rL0gy8=
+github.com/zamiba/go-mediaitems v0.2.0/go.mod h1:A5Lo+WV6KW2ALpO2Z5XGBfzCI5oNikKm72GAWzKVqMU=
+golang.org/x/sys v0.42.0 h1:omrd2nAlyT5ESRdCLYdm3+fMfNFE/+Rf4bDIQImRJeo=
+golang.org/x/sys v0.42.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
+golang.org/x/text v0.37.0/go.mod h1:a5sjxXGs9hsn/AJVwuElvCAo9v8QYLzvavO5z2PiM38=

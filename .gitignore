@@ -1,0 +1,4 @@
+# Per-machine multi-module development files. Every developer's paths differ,
+# so these are never committed.
+go.work
+go.work.sum
