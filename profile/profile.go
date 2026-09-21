@@ -84,6 +84,11 @@ type Profile struct {
 
 	// Path is the absolute path of the profile folder on this device.
 	Path string `json:"path"`
+
+	// Picture is the absolute path of the profile's picture on this device -
+	// Path/picture.png, a PictureSize-square PNG - or empty if it has none.
+	// A program with nothing to show falls back to the name's first letter.
+	Picture string `json:"picture,omitempty"`
 }
 
 // ItemDir is where a program keeps what it records about one item for this

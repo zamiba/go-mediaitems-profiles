@@ -24,6 +24,7 @@ JSON file is read and written (`jsonfile`, so `profile.json` behaves exactly as
 <config>/MediaItem/profiles/            ← beside storage-units.json
   sam/                                  ← the slug is the identity
     profile.json
+    picture.png                         ← optional; 256×256, set through SetPicture
     MediaItems/
       VideoGameFanPort/
         Ship of Harkinian · 2022/       ← saves, config; whatever the port keeps
@@ -97,17 +98,33 @@ be optional creates one for people who did not ask — PortForge's is named
 any other. It is not hidden: another program on the same device will list it,
 which is correct, since it holds real data.
 
-**Nothing here deletes.** A profile is someone's saves. Deleting one is a
-deliberate act for a person with a file manager, not a call a program makes.
+**Deleting is one call, and it decides nothing.** `Delete(slug)` removes this
+device's copy — the folder and everything in it, including a `.git` — and is
+here rather than left to `os.RemoveAll` in each program so that every program
+deletes the same way. It is not undoable from the module, it does not touch
+copies on other devices or anything a backend has already pushed, and it makes
+no judgement about *which* profile: a program calling it must have had the
+person confirm, in words that say what is lost. The module trusts the caller
+on that.
+
+**A picture is a fixed file, so nobody sniffs.** `SetPicture(slug, reader)`
+takes a PNG, JPEG or GIF, centre-crops it to a square, scales it to 256×256,
+and writes `picture.png` beside `profile.json`. `Profile.Picture` is that
+file's path or empty. The crop and the size live here so every program shows
+the same picture the same way, and so a phone photograph is not committed to
+git in full for a thirty-pixel avatar. The file is about the person and
+travels with the profile like everything else in the folder.
 
 ## Public API
 
 ```go
 const (
-    DirName       = "profiles"
-    FileName      = "profile.json"
-    ItemsDirName  = "MediaItems"
-    SchemaVersion = 1
+    DirName         = "profiles"
+    FileName        = "profile.json"
+    ItemsDirName    = "MediaItems"
+    PictureFileName = "picture.png"
+    PictureSize     = 256
+    SchemaVersion   = 1
 )
 
 type Profile struct {
@@ -116,6 +133,7 @@ type Profile struct {
     CreatedAt time.Time `json:"createdAt"` // written to the file as _createdAt
     CreatedBy string    `json:"createdBy,omitempty"` // written as _createdBy
     Path      string    `json:"path"`      // absolute, on this device; never persisted
+    Picture   string    `json:"picture,omitempty"` // Path/picture.png if present; never persisted
 }
 
 func (p Profile) ItemDir(itemType, itemTitle string) (string, error) // both must be single folder names
@@ -133,6 +151,9 @@ func (m *Manager) Get(slug string) (Profile, error)
 func (m *Manager) Create(name, createdBy string) (Profile, error)
 func (m *Manager) Ensure(name, createdBy string) (Profile, error) // get-or-create
 func (m *Manager) Rename(slug, name string) error
+func (m *Manager) Delete(slug string) error                    // this device's copy; irreversible here
+func (m *Manager) SetPicture(slug string, src io.Reader) error // PNG/JPEG/GIF in; picture.png out
+func (m *Manager) RemovePicture(slug string) error             // no-op if none
 
 var (
     ErrEmptyName      // blank, or slugifies to nothing
@@ -142,6 +163,7 @@ var (
     ErrEmptyItemTitle
     ErrBadItemType    // ItemDir: contains a separator, or is "." or ".."
     ErrBadItemTitle   // ItemDir: same — would resolve outside the profile
+    ErrBadPicture     // SetPicture: not a PNG, JPEG or GIF
 )
 ```
 
@@ -233,3 +255,5 @@ real three-way merge no Go library provides. A tool that is not installed is a
   moving a handful of saves from one profile to another, are later features
   with their own tools. `profilesync` does not do them either; it only pushes.
 - **Snapshots.** Left to git, or whatever the user runs.
+- **The confirmation before a delete.** That is a screen, and it belongs to the
+  program showing it.

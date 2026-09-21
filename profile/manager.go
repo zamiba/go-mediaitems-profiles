@@ -110,6 +110,7 @@ func (m *Manager) Get(slug string) (Profile, error) {
 		CreatedAt: meta.createdAt,
 		CreatedBy: meta.createdBy,
 		Path:      dir,
+		Picture:   picturePath(dir),
 	}, nil
 }
 
@@ -175,6 +176,55 @@ func (m *Manager) Rename(slug, name string) error {
 	}
 	meta.name = name
 	return writeMeta(file, meta, false)
+}
+
+// Delete removes a profile - the folder and everything in it, including a
+// .git inside it - from this device.
+//
+// This is the one destructive call in the package, and it is here rather than
+// left to os.RemoveAll in each program because every program must delete the
+// same way: if a profile ever gains an index entry or a lock, deletion has to
+// know. What it does not do is decide. A profile is somebody's saves, so a
+// program calling this must have made the person confirm it in terms that say
+// what is lost - the module trusts the caller on that and does nothing to
+// second-guess it.
+//
+// It removes only this device's copy. Copies on other devices, and anything a
+// sync backend has already pushed, are untouched. It is not undoable from
+// here. A slug with no profile is ErrNotFound; a stray folder without a
+// profile.json is not a profile and cannot be deleted through this call.
+func (m *Manager) Delete(slug string) error {
+	p, err := m.Get(slug)
+	if err != nil {
+		return err
+	}
+	if err := removeAll(p.Path); err != nil {
+		return fmt.Errorf("profile: deleting %s: %w", p.Path, err)
+	}
+	return nil
+}
+
+// removeAll is os.RemoveAll with one retry after making the tree writable.
+// A git repository marks its object files read-only, and on Windows that is
+// enough to make removal fail with "access denied"; on Unix it is the parent
+// directory's permission that matters, so the retry is a no-op there.
+func removeAll(dir string) error {
+	err := os.RemoveAll(dir)
+	if err == nil {
+		return nil
+	}
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		mode := fs.FileMode(0o600)
+		if d.IsDir() {
+			mode = 0o700
+		}
+		_ = os.Chmod(path, mode)
+		return nil
+	})
+	return os.RemoveAll(dir)
 }
 
 // profileDir resolves a slug to its folder, refusing anything that is not a

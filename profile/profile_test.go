@@ -324,3 +324,61 @@ func TestUnparseableCreatedAtSurvivesARename(t *testing.T) {
 		t.Errorf("an unparseable _createdAt should read as zero, got %v", got.CreatedAt)
 	}
 }
+
+// Delete removes this device's copy of the profile - folder, contents, and a
+// .git inside it - and nothing else.
+func TestDeleteRemovesTheWholeFolder(t *testing.T) {
+	m := openTemp(t)
+	p, err := m.Create("Sam", "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := m.Create("Kid", "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Something inside, including a git object that git would mark read-only.
+	item, _ := p.ItemDir("VideoGame", "Melee · 2001")
+	os.MkdirAll(item, 0o755)
+	os.WriteFile(filepath.Join(item, "save.dat"), []byte("x"), 0o644)
+	objects := filepath.Join(p.Path, ".git", "objects", "ab")
+	os.MkdirAll(objects, 0o755)
+	os.WriteFile(filepath.Join(objects, "cdef"), []byte("blob"), 0o444)
+
+	if err := m.Delete("sam"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := os.Stat(p.Path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("profile folder still exists after Delete: %v", err)
+	}
+	if _, err := m.Get("sam"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Get after Delete: err = %v, want ErrNotFound", err)
+	}
+	if _, err := m.Get(other.Slug); err != nil {
+		t.Errorf("Delete touched another profile: %v", err)
+	}
+	if err := m.Delete("sam"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("deleting twice: err = %v, want ErrNotFound", err)
+	}
+}
+
+// A folder without a profile.json is not a profile, and Delete will not
+// remove it - the same rule Get applies, so nothing can be deleted through
+// this call that could not be seen through it.
+func TestDeleteRefusesWhatIsNotAProfile(t *testing.T) {
+	m := openTemp(t)
+	stray := filepath.Join(m.Dir(), "stray")
+	os.MkdirAll(stray, 0o755)
+	os.WriteFile(filepath.Join(stray, "keep.txt"), []byte("x"), 0o644)
+	if err := m.Delete("stray"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+	if _, err := os.Stat(filepath.Join(stray, "keep.txt")); err != nil {
+		t.Error("Delete removed a folder that is not a profile")
+	}
+	for _, slug := range []string{"..", "../x", "a/b", ""} {
+		if err := m.Delete(slug); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Delete(%q): err = %v, want ErrNotFound", slug, err)
+		}
+	}
+}
