@@ -57,7 +57,18 @@ const (
 	ItemsDirName = "MediaItems"
 
 	// SchemaVersion is written to every profile.json as _schemaVersion.
-	SchemaVersion = 1
+	//
+	// It is a MAJOR.MINOR string rather than a number, matching the MediaItem
+	// standard's rule for the key of the same name: a change to the shape of
+	// an existing field raises MAJOR, a new field raises MINOR, and two
+	// versions are ordered by comparing each part as an integer, so "1.10" is
+	// newer than "1.9". A profile is not a MediaItem, but one key name with
+	// two value types across one suite is a trap for anything generic enough
+	// to read both.
+	//
+	// Profiles written before 2026-09-28 carry the number 1 instead. They are
+	// read as "1.0" and rewritten in the new form - see readSchemaVersion.
+	SchemaVersion = "1.0"
 )
 
 // Profile is one person's folder, as seen by a caller.

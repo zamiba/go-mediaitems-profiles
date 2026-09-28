@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/zamiba/go-mediaitems/jsonfile"
@@ -21,6 +23,7 @@ type metadata struct {
 	name      string
 	createdAt time.Time
 	createdBy string
+	schema    string          // the file's declared _schemaVersion, "" if unreadable
 	obj       jsonfile.Object // the file as read, minus the typed keys
 }
 
@@ -72,7 +75,10 @@ func readMeta(path string) (metadata, error) {
 			}
 		}
 	}
-	delete(obj.Values, keySchemaVersion)
+	if v, ok := obj.Values[keySchemaVersion]; ok {
+		m.schema = readSchemaVersion(v)
+		delete(obj.Values, keySchemaVersion)
+	}
 	m.obj = obj
 	if m.name == "" {
 		return metadata{}, fmt.Errorf("profile: %s: no name", path)
@@ -103,11 +109,9 @@ func writeMeta(path string, m metadata, exclusive bool) error {
 // them, byte-stable output.
 func (m metadata) marshal() ([]byte, error) {
 	obj := m.obj.Clone()
-	version, err := json.Marshal(SchemaVersion)
-	if err != nil {
+	if err := obj.SetString(keySchemaVersion, m.writtenSchemaVersion()); err != nil {
 		return nil, err
 	}
-	obj.Set(keySchemaVersion, version)
 	if err := obj.SetString(keyName, m.name); err != nil {
 		return nil, err
 	}
@@ -126,4 +130,94 @@ func (m metadata) marshal() ([]byte, error) {
 		return nil, fmt.Errorf("profile: %w", err)
 	}
 	return out, nil
+}
+
+// readSchemaVersion interprets the _schemaVersion a file declares, in either
+// form it can legitimately be in: the MAJOR.MINOR string this package writes
+// now, or the bare number it wrote before 2026-09-28, which means that major
+// version and minor 0. Anything else - free text, a version with a part that
+// is not a plain integer - reads as "" and is treated as undeclared.
+//
+// A version is not user data the way a name or a timestamp is; it is this
+// package's own marker for how to read the rest of the file. So an unreadable
+// one is replaced rather than preserved, which is the opposite of the rule for
+// _createdAt, and deliberately so: keeping a version nobody can compare would
+// mean carrying a claim about the file's shape that no code can act on.
+func readSchemaVersion(raw json.RawMessage) string {
+	var str string
+	if err := json.Unmarshal(raw, &str); err == nil {
+		if _, _, ok := parseSchemaVersion(str); ok {
+			return str
+		}
+		return ""
+	}
+	var n int
+	if err := json.Unmarshal(raw, &n); err == nil && n >= 0 {
+		return strconv.Itoa(n) + ".0"
+	}
+	return ""
+}
+
+// writtenSchemaVersion is the version marshal stamps on the file: ours, unless
+// the file already declared a newer one.
+//
+// The guard matters because this package rewrites whole files - a rename
+// touches every key - so without it, an old build opening a profile written by
+// a future one would quietly relabel it as older than it is while faithfully
+// preserving the fields that made it newer. That is worse than either half
+// alone: the file would keep its new shape and lose the only marker saying so.
+func (m metadata) writtenSchemaVersion() string {
+	if newerSchemaVersion(m.schema, SchemaVersion) {
+		return m.schema
+	}
+	return SchemaVersion
+}
+
+// newerSchemaVersion reports whether a is a later version than b. An
+// unparseable version is never later than anything.
+func newerSchemaVersion(a, b string) bool {
+	aMajor, aMinor, ok := parseSchemaVersion(a)
+	if !ok {
+		return false
+	}
+	bMajor, bMinor, ok := parseSchemaVersion(b)
+	if !ok {
+		return true
+	}
+	if aMajor != bMajor {
+		return aMajor > bMajor
+	}
+	return aMinor > bMinor
+}
+
+// parseSchemaVersion splits MAJOR.MINOR. Both parts must be plain digits: a
+// version string is not a decimal number, because "1.10" is newer than "1.9"
+// and no numeric parse would tell you that.
+func parseSchemaVersion(s string) (major, minor int, ok bool) {
+	dot := strings.IndexByte(s, '.')
+	if dot < 0 {
+		return 0, 0, false
+	}
+	if major, ok = digits(s[:dot]); !ok {
+		return 0, 0, false
+	}
+	if minor, ok = digits(s[dot+1:]); !ok {
+		return 0, 0, false
+	}
+	return major, minor, true
+}
+
+// digits parses an unsigned decimal integer, rejecting the signs and spaces
+// strconv.Atoi would otherwise accept.
+func digits(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.Atoi(s)
+	return n, err == nil
 }

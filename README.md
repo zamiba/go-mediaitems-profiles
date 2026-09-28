@@ -39,7 +39,7 @@ JSON file is read and written (`jsonfile`, so `profile.json` behaves exactly as
 
 ```json
 {
-  "_schemaVersion": 1,
+  "_schemaVersion": "1.0",
   "_createdAt": "2026-09-19T10:12:00Z",
   "_createdBy": "portforge",
   "name": "Sam"
@@ -51,10 +51,22 @@ the person — and carry the prefix for the reason the MediaItem standard gives
 it: so they are distinguishable at a glance from data fields, of which there is
 one. `_createdAt` is the standard's own field name.
 
+`_schemaVersion` is a `MAJOR.MINOR` string, ordered by comparing each part as
+an integer, so `"1.10"` is newer than `"1.9"`. That is the MediaItem standard's
+rule for the key of the same name. A profile is not a MediaItem, but one key
+name with two value types across one suite is a trap for anything generic
+enough to read both. Profiles written before 2026-09-28 carry the number `1`;
+they are read as `"1.0"` and rewritten in the new form the next time anything
+changes the file. A file that declares a *newer* version keeps it, rather than
+being relabelled as older than it is by a build that does not understand it.
+
 Keys this module does not know are preserved on every write, in the order they
 were in, so a program can add its own and a rename from another will not lose
 them. So is a `_createdAt` this module cannot parse: unreadable is not the same
-as deletable.
+as deletable. A `_schemaVersion` it cannot parse is replaced, not preserved —
+that key is this module's own marker for how to read the rest of the file, not
+somebody's data, and a version no code can compare is a claim nothing can act
+on.
 
 ## The rules, and why
 
@@ -124,7 +136,7 @@ const (
     ItemsDirName    = "MediaItems"
     PictureFileName = "picture.png"
     PictureSize     = 256
-    SchemaVersion   = 1
+    SchemaVersion   = "1.0"
 )
 
 type Profile struct {

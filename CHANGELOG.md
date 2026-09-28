@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.3.0 — 2026-09-28
+
+### Changed
+
+- **`_schemaVersion` in `profile.json` is now the string `"1.0"`**, not the
+  number `1`, matching the MediaItem standard's format for the key of the same
+  name: `MAJOR.MINOR`, ordered by comparing each part as an integer so `"1.10"`
+  is newer than `"1.9"`. A profile is not a MediaItem, but one key name with
+  two value types across one suite is a trap for anything generic enough to
+  read both.
+- **`SchemaVersion` is therefore a string constant**, where it was an untyped
+  integer. This is the only breaking change; nothing in the suite referenced
+  it.
+
+### Added
+
+- **Profiles written before 2026-09-28 keep working.** A numeric
+  `_schemaVersion` reads as that major version with minor `0`, and the file is
+  rewritten in the new form the next time anything changes it. There is no
+  migration step and nothing to run.
+- **A file declaring a newer version keeps it.** This package rewrites whole
+  files, so without the guard an older build would relabel a newer profile as
+  older than it is while faithfully preserving the fields that made it newer —
+  leaving a file with a new shape and no marker saying so.
+- A `_schemaVersion` that cannot be read is replaced rather than preserved,
+  unlike `_createdAt`: it is this package's own marker, not somebody's data.
+
 ## v0.2.0 — 2026-09-21
 
 ### Added

@@ -62,7 +62,7 @@ func TestCreateMakesAFolderNamedByTheSlug(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got["_schemaVersion"] != float64(SchemaVersion) || got["name"] != "Sam's Profile" || got["_createdBy"] != "portforge" {
+	if got["_schemaVersion"] != SchemaVersion || got["name"] != "Sam's Profile" || got["_createdBy"] != "portforge" {
 		t.Errorf("profile.json = %s", body)
 	}
 	// Meta fields carry the standard's "_" prefix; the one data field does not.
@@ -183,7 +183,7 @@ func TestRenamePreservesWhatOtherProgramsWrote(t *testing.T) {
 	m := openTemp(t)
 	dir := filepath.Join(m.Dir(), "sam")
 	os.MkdirAll(dir, 0o755)
-	original := "{\n  \"avatar\": \"sam.png\",\n  \"name\": \"Sam\",\n  \"htpc\": {\n    \"pin\": \"1234\"\n  },\n  \"_schemaVersion\": 1\n}\n"
+	original := "{\n  \"avatar\": \"sam.png\",\n  \"name\": \"Sam\",\n  \"htpc\": {\n    \"pin\": \"1234\"\n  },\n  \"_schemaVersion\": \"1.0\"\n}\n"
 	file := filepath.Join(dir, FileName)
 	os.WriteFile(file, []byte(original), 0o644)
 
@@ -198,7 +198,7 @@ func TestRenamePreservesWhatOtherProgramsWrote(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := os.ReadFile(file)
-	want := "{\n  \"avatar\": \"sam.png\",\n  \"name\": \"Samantha\",\n  \"htpc\": {\n    \"pin\": \"1234\"\n  },\n  \"_schemaVersion\": 1\n}\n"
+	want := "{\n  \"avatar\": \"sam.png\",\n  \"name\": \"Samantha\",\n  \"htpc\": {\n    \"pin\": \"1234\"\n  },\n  \"_schemaVersion\": \"1.0\"\n}\n"
 	if string(body) != want {
 		t.Errorf("after rename:\n%s\nwant:\n%s", body, want)
 	}
@@ -380,5 +380,99 @@ func TestDeleteRefusesWhatIsNotAProfile(t *testing.T) {
 		if err := m.Delete(slug); !errors.Is(err, ErrNotFound) {
 			t.Errorf("Delete(%q): err = %v, want ErrNotFound", slug, err)
 		}
+	}
+}
+
+// Profiles written before 2026-09-28 carry the number 1 rather than the string
+// "1.0". They keep working, and are upgraded in place the next time anything
+// rewrites the file - which is the whole of the migration.
+func TestLegacyNumericSchemaVersionIsUpgradedInPlace(t *testing.T) {
+	m := openTemp(t)
+	dir := filepath.Join(m.Dir(), "sam")
+	os.MkdirAll(dir, 0o755)
+	file := filepath.Join(dir, FileName)
+	os.WriteFile(file, []byte("{\n  \"_schemaVersion\": 1,\n  \"name\": \"Sam\",\n  \"avatar\": \"sam.png\"\n}\n"), 0o644)
+
+	// Readable before the rewrite: an old file is not a broken file.
+	p, err := m.Get("sam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "Sam" {
+		t.Fatalf("Name = %q", p.Name)
+	}
+
+	if err := m.Rename("sam", "Samantha"); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(file)
+	want := "{\n  \"_schemaVersion\": \"1.0\",\n  \"name\": \"Samantha\",\n  \"avatar\": \"sam.png\"\n}\n"
+	if string(body) != want {
+		t.Errorf("after rename:\n%s\nwant:\n%s", body, want)
+	}
+}
+
+// A file from a future version of this package keeps its own version marker.
+// Rewriting the whole file while relabelling it as older would leave it with a
+// shape nothing declares.
+func TestANewerSchemaVersionIsNotStampedDown(t *testing.T) {
+	m := openTemp(t)
+	dir := filepath.Join(m.Dir(), "sam")
+	os.MkdirAll(dir, 0o755)
+	file := filepath.Join(dir, FileName)
+	os.WriteFile(file, []byte("{\n  \"_schemaVersion\": \"2.3\",\n  \"name\": \"Sam\",\n  \"mood\": \"cheerful\"\n}\n"), 0o644)
+
+	if err := m.Rename("sam", "Samantha"); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(file)
+	want := "{\n  \"_schemaVersion\": \"2.3\",\n  \"name\": \"Samantha\",\n  \"mood\": \"cheerful\"\n}\n"
+	if string(body) != want {
+		t.Errorf("after rename:\n%s\nwant:\n%s", body, want)
+	}
+}
+
+// An unreadable version is this package's own marker gone wrong, not somebody
+// else's data, so it is replaced rather than preserved - unlike _createdAt.
+func TestAnUnreadableSchemaVersionIsReplaced(t *testing.T) {
+	for _, raw := range []string{`"tomorrow"`, `"1"`, `"1.2.3"`, `"v1.0"`, `"1.-2"`, `" 1.0"`, `true`, `null`, `[1]`} {
+		m := openTemp(t)
+		dir := filepath.Join(m.Dir(), "sam")
+		os.MkdirAll(dir, 0o755)
+		file := filepath.Join(dir, FileName)
+		os.WriteFile(file, []byte("{\"_schemaVersion\": "+raw+", \"name\": \"Sam\"}"), 0o644)
+
+		if err := m.Rename("sam", "Samantha"); err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+		body, _ := os.ReadFile(file)
+		if !strings.Contains(string(body), `"_schemaVersion": "1.0"`) {
+			t.Errorf("%s: after rename:\n%s", raw, body)
+		}
+	}
+}
+
+// "1.10" is newer than "1.9", which is the whole reason the version is a pair
+// of integers rather than a decimal number.
+func TestSchemaVersionOrdering(t *testing.T) {
+	newer := [][2]string{
+		{"1.10", "1.9"},
+		{"2.0", "1.99"},
+		{"1.1", "1.0"},
+		{"10.0", "9.9"},
+	}
+	for _, c := range newer {
+		if !newerSchemaVersion(c[0], c[1]) {
+			t.Errorf("newerSchemaVersion(%q, %q) = false, want true", c[0], c[1])
+		}
+		if newerSchemaVersion(c[1], c[0]) {
+			t.Errorf("newerSchemaVersion(%q, %q) = true, want false", c[1], c[0])
+		}
+	}
+	if newerSchemaVersion("1.0", "1.0") {
+		t.Error("a version is newer than itself")
+	}
+	if newerSchemaVersion("nonsense", "1.0") {
+		t.Error("an unparseable version is newer than a real one")
 	}
 }
