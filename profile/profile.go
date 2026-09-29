@@ -38,6 +38,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/zamiba/go-mediaitems/itemtitle"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -109,11 +110,24 @@ type Profile struct {
 // The folder is not created; the caller does that when it has something to
 // write, so listing a profile shows only items it holds data for.
 //
-// Both names must be single folder names. An item title comes from catalogue
-// data - a .mediaitem.json somebody else wrote - and a title containing a
-// separator or ".." would otherwise resolve to a path outside the profile.
-// The standard's folder names never contain a separator, so a rejected value
-// is a malformed one, not a legitimate one.
+// Both names are checked with itemtitle.ValidFolderName, the standard's own
+// rule, rather than with anything this package invents. That matters more here
+// than anywhere else in the suite: this folder mirrors the item's folder on a
+// storage unit, so a rule that differs by one character does not fail - it
+// files one item in two places, on two devices, and nothing ever says so.
+//
+// Both names are normalised to NFC first, and the normalised form is what the
+// path uses. This is not repair and it changes no character: an "ö" can be one
+// code point or an "o" with a separate accent mark, the two look identical and
+// are different bytes, and some filesystems rewrite one into the other. Without
+// this a catalogue authored on a Mac and one authored on Linux would give the
+// same item two folders - which is the exact failure this function exists to
+// prevent. Sanitizing is a different thing and is deliberately not done here:
+// it would strip the separators out of a finished _itemTitle.
+//
+// An item title comes from catalogue data - a .mediaitem.json somebody else
+// wrote - so a rejected value is a malformed one, and refusing it is what
+// stands between that file and a path outside the profile.
 func (p Profile) ItemDir(itemType, itemTitle string) (string, error) {
 	if strings.TrimSpace(itemType) == "" {
 		return "", ErrEmptyItemType
@@ -121,24 +135,14 @@ func (p Profile) ItemDir(itemType, itemTitle string) (string, error) {
 	if strings.TrimSpace(itemTitle) == "" {
 		return "", ErrEmptyItemTitle
 	}
-	if !isFolderName(itemType) {
+	itemType, itemTitle = norm.NFC.String(itemType), norm.NFC.String(itemTitle)
+	if !itemtitle.ValidFolderName(itemType) {
 		return "", fmt.Errorf("%w: %q", ErrBadItemType, itemType)
 	}
-	if !isFolderName(itemTitle) {
+	if !itemtitle.ValidFolderName(itemTitle) {
 		return "", fmt.Errorf("%w: %q", ErrBadItemTitle, itemTitle)
 	}
 	return filepath.Join(p.Path, ItemsDirName, itemType, itemTitle), nil
-}
-
-// isFolderName reports whether s can only ever name one folder directly inside
-// another: no separators of either kind, and not the "." or ".." that would
-// point elsewhere. Used for slugs, item types and item titles alike, because
-// all three are joined onto a path a caller did not choose.
-func isFolderName(s string) bool {
-	if s == "" || s == "." || s == ".." {
-		return false
-	}
-	return !strings.ContainsAny(s, `/\`)
 }
 
 // Slugify turns a display name into a folder name: lower-cased, letters and

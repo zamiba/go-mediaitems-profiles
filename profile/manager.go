@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zamiba/go-mediaitems/itemtitle"
 	"github.com/zamiba/go-mediaitems/storageunit"
 )
 
@@ -125,6 +126,14 @@ func (m *Manager) Create(name, createdBy string) (Profile, error) {
 	if slug == "" {
 		return Profile{}, ErrEmptyName
 	}
+	// Refused here rather than at mkdir, because on Linux the folder is made
+	// happily and the profile only breaks later, on whichever device the
+	// person copies it to. Get and List do not apply this: a profile that
+	// already exists must stay reachable, and refusing to find one would lose
+	// somebody's data rather than protect it.
+	if itemtitle.Reserved(slug) {
+		return Profile{}, fmt.Errorf("%w: %q", ErrReservedName, slug)
+	}
 	dir := filepath.Join(m.dir, slug)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Profile{}, fmt.Errorf("profile: creating %s: %w", dir, err)
@@ -227,11 +236,18 @@ func removeAll(dir string) error {
 	return os.RemoveAll(dir)
 }
 
-// profileDir resolves a slug to its folder, refusing anything that is not a
-// plain folder name so a slug from outside cannot reach past the profiles
-// folder.
+// profileDir resolves a slug to its folder, refusing anything that could reach
+// past the profiles folder.
+//
+// itemtitle.PathSafe, not ValidFolderName: this is the one place in the suite
+// that deliberately takes the security floor alone. A slug is not an
+// _itemTitle - it is deliberately reductive, and it is an identity that
+// already exists in folders on people's machines. Holding it to the standard's
+// rule would not prevent a bad profile from being made; it would make an
+// existing profile unreachable, which is much the worse failure. Create is
+// where a new slug is judged, and it is stricter.
 func (m *Manager) profileDir(slug string) (string, error) {
-	if !isFolderName(slug) {
+	if !itemtitle.PathSafe(slug) {
 		return "", ErrNotFound
 	}
 	return filepath.Join(m.dir, slug), nil

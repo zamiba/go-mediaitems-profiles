@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.4.0 — 2026-09-29
+
+### Changed
+
+- **Requires `go-mediaitems` v0.4.0**, for the `itemtitle` package.
+- **Slug resolution uses `itemtitle.PathSafe`**, and this package's own
+  `isFolderName` is gone. There is now one implementation of "is this a single
+  safe folder name" in the suite rather than two. Slightly stricter, since
+  `PathSafe` also rejects control characters; `Slugify` never produced one, so
+  nothing that exists can be orphaned by it.
+
+  Slugs deliberately take the **security floor alone** rather than
+  `ValidFolderName`: a slug is not an `_itemTitle`. It is reductive by design,
+  and it is an identity that already exists in folders on people's machines, so
+  holding it to the standard's rule would not prevent a bad profile from being
+  made — it would make an existing one unreachable. `Get` and `List` therefore
+  still find a profile whose slug is `con`, `.sam` or `sam.`; `Create` is where
+  a new slug is judged, and it is stricter.
+- **`Profile.ItemDir` now checks both names with `itemtitle.ValidFolderName`**
+  — the MediaItem standard's rule — instead of this package's own
+  `isFolderName`, which only rejected path separators and `.`/`..`. This
+  folder mirrors the item's folder on a storage unit, so a rule that differs
+  by one character does not fail: it files one item in two places.
+  **This is stricter, and is a behaviour change for callers.** Titles that
+  were accepted before and are now refused include a colon or any other
+  character Windows forbids, a leading dot, a trailing dot or space, a doubled
+  space, a name that is not NFC, and the names Windows reserves for devices.
+  PortForge checked its catalogue when the rule was agreed and found nothing
+  affected.
+- **`ItemDir` normalises both names to NFC** and uses the normalised form in
+  the path. It changes no character; it is what stops one item getting two
+  folders when one catalogue was authored on a Mac and another on Linux.
+  Sanitizing is deliberately not done here — it would strip the separators out
+  of a finished `_itemTitle`.
+- `ErrBadItemType` and `ErrBadItemTitle` keep their meaning and widen their
+  message.
+
+### Added
+
+- **`ErrReservedName`** — `Create` refuses a name whose slug is one Windows
+  keeps for a device (`Con`, `Aux`, `Nul`, `Prn`, `Com1`…). The folder cannot
+  exist there, so creating one would make a profile that breaks the moment it
+  is copied to Windows, which is the one thing profiles are meant to survive.
+  `Get` and `List` do **not** apply the rule: a profile that already exists
+  stays reachable, because losing somebody's data is worse than the
+  portability problem.
+
 ## v0.3.0 — 2026-09-28
 
 ### Changed

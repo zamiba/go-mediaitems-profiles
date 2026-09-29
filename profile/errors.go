@@ -26,8 +26,18 @@ var (
 	ErrEmptyItemTitle = errors.New("profile: item title cannot be empty")
 
 	// ErrBadItemType and ErrBadItemTitle are returned by ItemDir for a value
-	// that is not a single folder name - one containing a path separator, or
-	// "." or "..". Such a value would resolve to a path outside the profile.
-	ErrBadItemType  = errors.New("profile: item type is not a folder name")
-	ErrBadItemTitle = errors.New("profile: item title is not a folder name")
+	// that itemtitle.ValidFolderName rejects: one that would resolve to a path
+	// outside the profile, or that is not a name the MediaItem standard could
+	// have produced and every filesystem in the suite can hold.
+	ErrBadItemType  = errors.New("profile: item type is not a valid folder name")
+	ErrBadItemTitle = errors.New("profile: item title is not a valid folder name")
+
+	// ErrReservedName is returned by Create for a name whose slug is one
+	// Windows keeps for a device - "Con", "Aux", "Nul", "Prn", "Com1" and the
+	// rest. The folder simply cannot exist there, so creating one here would
+	// make a profile that stops working the moment it is copied to a Windows
+	// machine, which is the one thing profiles are meant to survive. Existing
+	// profiles with such a slug are still found and read; only making a new
+	// one is refused.
+	ErrReservedName = errors.New("profile: that name cannot be used as a folder on Windows")
 )

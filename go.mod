@@ -3,7 +3,7 @@ module github.com/zamiba/go-mediaitems-profiles
 go 1.25.0
 
 require (
-	github.com/zamiba/go-mediaitems v0.2.0
+	github.com/zamiba/go-mediaitems v0.4.0
 	golang.org/x/image v0.45.0
 	golang.org/x/text v0.41.0
 )

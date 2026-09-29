@@ -104,6 +104,16 @@ depending on the keyboard that typed it. `Rename` changes the display name
 only; a folder rename would break every link and path into it, from every
 program on the device.
 
+**A slug is not an `_itemTitle`, and is deliberately not held to the standard's
+rule.** Looking one up checks `itemtitle.PathSafe` — the security floor alone —
+where `ItemDir` checks the full `itemtitle.ValidFolderName`. That is not an
+oversight. A slug is reductive by design, and it is an identity that already
+exists in folders on people's machines, so refusing one here would not prevent
+a bad profile from being made: it would make an existing profile unreachable,
+which is much the worse failure. So `Get` and `List` will still find a profile
+whose slug is `con` or `.sam`. `Create` is where a new slug is judged, and it
+refuses the names Windows keeps for devices.
+
 **Default profiles are ordinary profiles.** A program that wants profiles to
 be optional creates one for people who did not ask — PortForge's is named
 `portforge` — through `Ensure`, records itself in `createdBy`, and uses it like
@@ -148,7 +158,7 @@ type Profile struct {
     Picture   string    `json:"picture,omitempty"` // Path/picture.png if present; never persisted
 }
 
-func (p Profile) ItemDir(itemType, itemTitle string) (string, error) // both must be single folder names
+func (p Profile) ItemDir(itemType, itemTitle string) (string, error) // NFC-normalised, then itemtitle.ValidFolderName
 func Slugify(name string) string
 
 type Options struct { Dir string } // empty means DefaultDir()
@@ -173,8 +183,9 @@ var (
     ErrNotFound
     ErrEmptyItemType
     ErrEmptyItemTitle
-    ErrBadItemType    // ItemDir: contains a separator, or is "." or ".."
-    ErrBadItemTitle   // ItemDir: same — would resolve outside the profile
+    ErrBadItemType    // ItemDir: itemtitle.ValidFolderName rejects it
+    ErrBadItemTitle   // ItemDir: same
+    ErrReservedName   // Create: the slug is a Windows device name ("Con", "Nul", …)
     ErrBadPicture     // SetPicture: not a PNG, JPEG or GIF
 )
 ```
@@ -182,10 +193,28 @@ var (
 `Create` writes only `profile.json`, and creates it exclusively, so two
 programs creating the same profile at once cannot both think they did.
 `ItemDir` does not create the folder: the caller does when it has something to
-write, so listing a profile shows only the items it holds data for. It refuses
-a type or title that is not a single folder name, because a title comes from
-catalogue data somebody else wrote and one containing `..` or a separator would
-otherwise point outside the profile.
+write, so listing a profile shows only the items it holds data for.
+
+**It checks both names with `itemtitle.ValidFolderName` from `go-mediaitems`,
+the MediaItem standard's own rule, rather than with anything this package
+invents.** That matters more here than anywhere else in the suite: this folder
+mirrors the item's folder on a storage unit, so a rule that differs by one
+character does not produce an error — it files one item in two places, on two
+devices, and nothing ever says so. It also refuses what a title from somebody
+else's `.mediaitem.json` could otherwise do: `..`, a separator, a name Windows
+cannot hold.
+
+**Both names are normalised to NFC first, and the normalised form is what the
+path uses.** This changes no character. An `ö` can be one code point or an `o`
+with a separate accent mark; the two look identical, are different bytes, and
+some filesystems rewrite one into the other — so without this, a catalogue
+authored on a Mac and one authored on Linux give the same item two folders.
+Sanitizing is a different operation and is deliberately *not* done here: it
+would strip the separators out of a finished `_itemTitle`.
+
+A disambiguating suffix is part of a legitimate name, so `Lord of the Rings
+· 2001_tt0120737` is accepted; everything after the `_` is ignored for
+conformance but still checked for path safety.
 
 ## `profilesync` — sending a changed profile where the user wants it
 

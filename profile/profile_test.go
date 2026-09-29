@@ -206,7 +206,10 @@ func TestRenamePreservesWhatOtherProgramsWrote(t *testing.T) {
 
 func TestGetRefusesSlugsThatLeaveTheFolder(t *testing.T) {
 	m := openTemp(t)
-	for _, slug := range []string{"", ".", "..", "../x", "a/b", "sam/"} {
+	// The last two are new with itemtitle.PathSafe, which rejects control
+	// characters where this package's own helper did not. Slugify never
+	// produces one, so nothing that exists can be orphaned by the change.
+	for _, slug := range []string{"", ".", "..", "../x", "a/b", "sam/", "sa\x00m", "sa\x7fm"} {
 		if _, err := m.Get(slug); !errors.Is(err, ErrNotFound) {
 			t.Errorf("Get(%q): err = %v, want ErrNotFound", slug, err)
 		}
@@ -474,5 +477,108 @@ func TestSchemaVersionOrdering(t *testing.T) {
 	}
 	if newerSchemaVersion("nonsense", "1.0") {
 		t.Error("an unparseable version is newer than a real one")
+	}
+}
+
+// The reason ItemDir uses the standard's rule rather than a local one: this
+// folder mirrors the item's folder on a storage unit, so a name the two
+// disagree about does not fail - it files one item in two places.
+func TestItemDirRefusesNamesThatAreNotValidFolderNames(t *testing.T) {
+	p := Profile{Path: "/p"}
+	for _, title := range []string{
+		"Movie: 2001",   // a colon; Windows refuses the folder outright
+		".hack--SIGN",   // leading dot; the folder is hidden from ls, Finder and globs
+		"Movie · 2001 ", // trailing space; Windows silently strips it, and the folder stops matching its own _itemTitle
+		"Movie · 2001.", // trailing dot; likewise
+		"Movie  · 2001", // doubled space
+		"CON",           // a name Windows keeps for a device
+		"nul.txt",
+	} {
+		if _, err := p.ItemDir("VideoGame", title); !errors.Is(err, ErrBadItemTitle) {
+			t.Errorf("ItemDir(title=%q): err = %v, want ErrBadItemTitle", title, err)
+		}
+	}
+	// A disambiguating suffix is part of a legitimate folder name, and what
+	// follows it is whatever field the cataloguer found distinguishing.
+	for _, title := range []string{
+		"Movie · 2001_tt0120737",
+		"Movie · 2001_anything at all: really",
+		"-hack · 2002",
+		"Movie · 2001_CON",
+		// Not a mistake: this is the title "Movie" disambiguated by the field
+		// value "2001". Nothing distinguishes it from a title that happens to
+		// look like one, and nothing needs to - the JSON is authoritative.
+		"Movie_2001",
+	} {
+		if _, err := p.ItemDir("VideoGame", title); err != nil {
+			t.Errorf("ItemDir(title=%q): err = %v, want none", title, err)
+		}
+	}
+}
+
+// The bug this whole change exists to prevent: an "ö" written as one code
+// point and as an "o" plus a separate accent looks identical and is different
+// bytes, so two catalogues would give one item two folders on two devices.
+func TestItemDirNormalisesSoOneItemGetsOneFolder(t *testing.T) {
+	p := Profile{Path: "/p"}
+	decomposed, err := p.ItemDir("Movie", "Björn · 2001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	composed, err := p.ItemDir("Movie", "Björn · 2001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decomposed != composed {
+		t.Errorf("two spellings of one title gave two folders:\n  %q\n  %q", decomposed, composed)
+	}
+	if !strings.Contains(composed, "Björn") {
+		t.Errorf("ItemDir did not normalise to NFC: %q", composed)
+	}
+}
+
+// A profile whose folder cannot exist on Windows is refused when it is made,
+// not when it is copied - but one that already exists stays reachable, because
+// losing somebody's data is worse than the portability problem.
+func TestCreateRefusesAWindowsDeviceName(t *testing.T) {
+	m := openTemp(t)
+	for _, name := range []string{"Con", "nul", "AUX", "com1"} {
+		if _, err := m.Create(name, "test"); !errors.Is(err, ErrReservedName) {
+			t.Errorf("Create(%q): err = %v, want ErrReservedName", name, err)
+		}
+	}
+	for _, name := range []string{"Connor", "Auxiliary", "Com10", "Conan"} {
+		if _, err := m.Create(name, "test"); err != nil {
+			t.Errorf("Create(%q): err = %v, want none", name, err)
+		}
+	}
+	// An existing one is still found: Get and List do not apply the rule.
+	dir := filepath.Join(m.Dir(), "con")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, FileName), []byte(`{"_schemaVersion": "1.0", "name": "Con"}`), 0o644)
+	if got, err := m.Get("con"); err != nil || got.Name != "Con" {
+		t.Errorf("Get(\"con\") = %v, %v; an existing profile must stay reachable", got, err)
+	}
+}
+
+// A slug takes the security floor alone, deliberately: it is not an
+// _itemTitle. These are all names the standard's fuller rule would reject and
+// that must keep working here, because a profile folder with one of them may
+// already exist on somebody's machine and refusing to find it would lose their
+// data rather than protect it.
+func TestGetStillFindsSlugsTheStandardWouldReject(t *testing.T) {
+	m := openTemp(t)
+	for _, slug := range []string{"con", "nul", "sam.", ".sam", "sam-s-profile"} {
+		dir := filepath.Join(m.Dir(), slug)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := []byte(`{"_schemaVersion": "1.0", "name": "Sam"}`)
+		if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := m.Get(slug); err != nil || got.Slug != slug {
+			t.Errorf("Get(%q) = %v, %v; an existing profile must stay reachable", slug, got, err)
+		}
 	}
 }
